@@ -1,0 +1,115 @@
+name: Render video
+
+on:
+  workflow_dispatch:
+    inputs:
+      payload:
+        description: "JSON: title, description, tags, scenes[{text, clip}]"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Install voice tool
+        run: pip install edge-tts
+
+      - name: Render and publish
+        env:
+          PAYLOAD: ${{ inputs.payload }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 - <<'PY'
+          import asyncio, json, os, subprocess, urllib.request
+          import edge_tts
+
+          VOICE = "en-US-AndrewNeural"
+          p = json.loads(os.environ["PAYLOAD"])
+          scenes = p["scenes"]
+          os.makedirs("work", exist_ok=True)
+
+          def run(cmd):
+              subprocess.run(cmd, check=True)
+
+          def duration(path):
+              out = subprocess.check_output([
+                  "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                  "-of", "default=nw=1:nk=1", path])
+              return float(out.strip())
+
+          def stamp(t):
+              h = int(t // 3600); m = int((t % 3600) // 60); s = t % 60
+              return f"{h:02d}:{m:02d}:{s:06.3f}".replace(".", ",")
+
+          async def make_voice(text, path):
+              await edge_tts.Communicate(text, VOICE).save(path)
+
+          srt = []
+          cue = 1
+          offset = 0.0
+          parts = []
+
+          for i, sc in enumerate(scenes):
+              text = sc["text"].strip()
+              audio = f"work/a{i}.mp3"
+              clip = f"work/c{i}.mp4"
+              part = f"work/p{i}.mp4"
+
+              asyncio.run(make_voice(text, audio))
+              d = duration(audio) + 0.25
+
+              req = urllib.request.Request(sc["clip"], headers={"User-Agent": "Mozilla/5.0"})
+              with urllib.request.urlopen(req, timeout=120) as r, open(clip, "wb") as f:
+                  f.write(r.read())
+
+              run([
+                  "ffmpeg", "-y", "-loglevel", "error",
+                  "-stream_loop", "-1", "-i", clip, "-i", audio,
+                  "-t", f"{d:.3f}",
+                  "-map", "0:v", "-map", "1:a",
+                  "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1",
+                  "-af", "apad",
+                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+                  "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                  part])
+              parts.append(part)
+
+              words = text.split()
+              chunks = [" ".join(words[k:k + 4]) for k in range(0, len(words), 4)]
+              step = d / max(len(chunks), 1)
+              for k, ch in enumerate(chunks):
+                  srt.append(f"{cue}\n{stamp(offset + k * step)} --> {stamp(offset + (k + 1) * step)}\n{ch}\n")
+                  cue += 1
+              offset += d
+
+          with open("work/list.txt", "w") as f:
+              for part in parts:
+                  f.write(f"file '{os.path.basename(part)}'\n")
+          with open("work/subs.srt", "w") as f:
+              f.write("\n".join(srt))
+
+          run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+               "-i", "work/list.txt", "-c", "copy", "work/joined.mp4"])
+
+          style = ("Fontname=DejaVu Sans,Bold=1,FontSize=12,Alignment=2,MarginV=45,"
+                   "Outline=3,PrimaryColour=&H00FFFFFF")
+          run(["ffmpeg", "-y", "-loglevel", "error", "-i", "work/joined.mp4",
+               "-vf", f"subtitles=work/subs.srt:force_style='{style}'",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+               "-c:a", "copy", "final.mp4"])
+
+          notes = json.dumps({
+              "title": p.get("title", ""),
+              "description": p.get("description", ""),
+              "tags": p.get("tags", "")
+          })
+          tag = "video-" + os.environ["RUN_NUMBER"]
+          run(["gh", "release", "create", tag, "final.mp4",
+               "--title", p.get("title", tag)[:100], "--notes", notes])
+          PY
