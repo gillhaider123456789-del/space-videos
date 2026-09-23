@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       payload:
-        description: "JSON: title, description, tags, scenes[{text, clip}]"
+        description: "JSON: title, description, tags, scenes[{text, query}]"
         required: true
 
 permissions:
@@ -21,15 +21,17 @@ jobs:
       - name: Render and publish
         env:
           PAYLOAD: ${{ inputs.payload }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           python3 - <<'PY'
-          import asyncio, json, os, subprocess, urllib.request
+          import asyncio, json, os, subprocess, urllib.request, urllib.parse
           import edge_tts
 
           VOICE = "en-US-AndrewNeural"
+          PEXELS_KEY = os.environ["PEXELS_API_KEY"]
           p = json.loads(os.environ["PAYLOAD"])
           scenes = p["scenes"]
           os.makedirs("work", exist_ok=True)
@@ -50,6 +52,26 @@ jobs:
           async def make_voice(text, path):
               await edge_tts.Communicate(text, VOICE).save(path)
 
+          def pexels_clip_url(query):
+              req = urllib.request.Request(
+                  "https://api.pexels.com/videos/search?query=" +
+                  urllib.parse.quote(query) + "&per_page=1&orientation=portrait",
+                  headers={"Authorization": PEXELS_KEY})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  data = json.loads(r.read())
+              videos = data.get("videos") or []
+              if not videos:
+                  req = urllib.request.Request(
+                      "https://api.pexels.com/videos/search?query=" +
+                      urllib.parse.quote(query) + "&per_page=1",
+                      headers={"Authorization": PEXELS_KEY})
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      data = json.loads(r.read())
+                  videos = data.get("videos") or []
+              files = videos[0]["video_files"]
+              files = sorted(files, key=lambda f: abs((f.get("height") or 0) - 1920))
+              return files[0]["link"]
+
           srt = []
           cue = 1
           offset = 0.0
@@ -57,6 +79,7 @@ jobs:
 
           for i, sc in enumerate(scenes):
               text = sc["text"].strip()
+              query = sc.get("query", "space")
               audio = f"work/a{i}.mp3"
               clip = f"work/c{i}.mp4"
               part = f"work/p{i}.mp4"
@@ -64,7 +87,8 @@ jobs:
               asyncio.run(make_voice(text, audio))
               d = duration(audio) + 0.25
 
-              req = urllib.request.Request(sc["clip"], headers={"User-Agent": "Mozilla/5.0"})
+              clip_url = pexels_clip_url(query)
+              req = urllib.request.Request(clip_url, headers={"User-Agent": "Mozilla/5.0"})
               with urllib.request.urlopen(req, timeout=120) as r, open(clip, "wb") as f:
                   f.write(r.read())
 
