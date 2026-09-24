@@ -34,10 +34,7 @@ jobs:
           import edge_tts
 
           VOICE = "en-US-AndrewNeural"
-          PEXELS_KEY = os.environ["PEXELS_API_KEY"]
-          print("PEXELS_KEY length:", len(PEXELS_KEY))
-          print("PEXELS_KEY has leading/trailing whitespace:", PEXELS_KEY != PEXELS_KEY.strip())
-          PEXELS_KEY = PEXELS_KEY.strip()
+          PEXELS_KEY = os.environ["PEXELS_API_KEY"].strip()
           p = json.loads(os.environ["PAYLOAD"])
           scenes = p["scenes"]
           os.makedirs("work", exist_ok=True)
@@ -62,7 +59,7 @@ jobs:
               req = urllib.request.Request(
                   "https://api.pexels.com/videos/search?query=" +
                   urllib.parse.quote(query) + "&per_page=1&orientation=portrait",
-                  headers={"Authorization": PEXELS_KEY})
+                  headers={"Authorization": PEXELS_KEY, "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
               try:
                   with urllib.request.urlopen(req, timeout=30) as r:
                       data = json.loads(r.read())
@@ -75,7 +72,7 @@ jobs:
                   req = urllib.request.Request(
                       "https://api.pexels.com/videos/search?query=" +
                       urllib.parse.quote(query) + "&per_page=1",
-                      headers={"Authorization": PEXELS_KEY})
+                      headers={"Authorization": PEXELS_KEY, "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
                   with urllib.request.urlopen(req, timeout=30) as r:
                       data = json.loads(r.read())
                   videos = data.get("videos") or []
