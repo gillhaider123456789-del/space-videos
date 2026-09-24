@@ -35,6 +35,9 @@ jobs:
 
           VOICE = "en-US-AndrewNeural"
           PEXELS_KEY = os.environ["PEXELS_API_KEY"]
+          print("PEXELS_KEY length:", len(PEXELS_KEY))
+          print("PEXELS_KEY has leading/trailing whitespace:", PEXELS_KEY != PEXELS_KEY.strip())
+          PEXELS_KEY = PEXELS_KEY.strip()
           p = json.loads(os.environ["PAYLOAD"])
           scenes = p["scenes"]
           os.makedirs("work", exist_ok=True)
@@ -60,8 +63,13 @@ jobs:
                   "https://api.pexels.com/videos/search?query=" +
                   urllib.parse.quote(query) + "&per_page=1&orientation=portrait",
                   headers={"Authorization": PEXELS_KEY})
-              with urllib.request.urlopen(req, timeout=30) as r:
-                  data = json.loads(r.read())
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      data = json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  print("Pexels error status:", e.code)
+                  print("Pexels error body:", e.read().decode(errors="replace"))
+                  raise
               videos = data.get("videos") or []
               if not videos:
                   req = urllib.request.Request(
