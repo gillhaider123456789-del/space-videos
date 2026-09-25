@@ -105,10 +105,10 @@ jobs:
                   "-stream_loop", "-1", "-i", clip, "-i", audio,
                   "-t", f"{d:.3f}",
                   "-map", "0:v", "-map", "1:a",
-                  "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1",
+                  "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,fps=24,setsar=1",
                   "-af", "apad",
-                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-                  "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p",
+                  "-c:a", "aac", "-ar", "44100", "-ac", "1", "-b:a", "64k",
                   part])
               parts.append(part)
 
@@ -131,10 +131,16 @@ jobs:
 
           style = ("Fontname=DejaVu Sans,Bold=1,FontSize=12,Alignment=2,MarginV=45,"
                    "Outline=3,PrimaryColour=&H00FFFFFF")
+          target_mb = 3.6
+          audio_kbps = 64
+          total_kbps = max(int(target_mb * 8 * 1024 / max(offset, 1)) - audio_kbps, 250)
           run(["ffmpeg", "-y", "-loglevel", "error", "-i", "work/joined.mp4",
                "-vf", f"subtitles=work/subs.srt:force_style='{style}'",
-               "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-               "-c:a", "copy", "final.mp4"])
+               "-c:v", "libx264", "-preset", "veryfast",
+               "-b:v", f"{total_kbps}k", "-maxrate", f"{int(total_kbps*1.4)}k", "-bufsize", f"{total_kbps*2}k",
+               "-pix_fmt", "yuv420p",
+               "-c:a", "aac", "-b:a", f"{audio_kbps}k", "-ac", "1", "-ar", "44100",
+               "final.mp4"])
 
           notes = json.dumps({
               "title": p.get("title", ""),
